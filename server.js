@@ -593,6 +593,7 @@ function scheduleEvent(config, opts = {}) {
       ffmpegTimeSec: 0,
       videoDurSec: null,
       estEndAt: null,
+      videoEndsAt: null,
       delaySec: 0
     }
   };
@@ -619,6 +620,9 @@ function scheduleEvent(config, opts = {}) {
       ctx.live.pipelineStartedAt = Date.now();
       ctx.live.videoDurSec = videoDurSec;
       ctx.live.estEndAt = estEnd.toISOString();
+      // Hora exacta en que termina el video (antes de cortinilla post)
+      const videoEndTime = new Date(Date.now() + (effectivePreviewSec + videoDurSec) * 1000);
+      ctx.live.videoEndsAt = videoEndTime.toISOString();
 
       logLine(id, `PROBE duration=${videoDurSec} hasAudio=${probeResult.hasAudio} ${probeResult.width}x${probeResult.height}@${Math.round(probeResult.fps)}fps estEnd=${estEnd.toISOString()}`);
       await pushover("Pipeline info", `Evento ${id}\nDuración video: ${fmtDur(videoDurSec)}\nRes: ${probeResult.width}x${probeResult.height}\nFin estimado: ${fmtTime(estEnd)}\nTotal stream: ${fmtDur(totalSec)}`);
@@ -1096,9 +1100,13 @@ app.get("/", (req, res) => {
           var dc=l.delaySec<5?'delay-ok':l.delaySec<15?'delay-med':'delay-bad';
           h+='<dt>Delay pipeline</dt><dd class="'+dc+'">'+l.delaySec.toFixed(1)+'s</dd>';
         }
+        if(l.videoEndsAt){
+          var vend=new Date(l.videoEndsAt);
+          h+='<dt>Video termina</dt><dd style="font-weight:600;color:var(--accent)">'+pad(vend.getHours())+':'+pad(vend.getMinutes())+':'+pad(vend.getSeconds())+'</dd>';
+        }
         if(l.estEndAt){
           var end=new Date(l.estEndAt);
-          h+='<dt>Fin estimado</dt><dd>'+pad(end.getHours())+':'+pad(end.getMinutes())+'</dd>';
+          h+='<dt>Fin stream</dt><dd>'+pad(end.getHours())+':'+pad(end.getMinutes())+'</dd>';
         }
         if(running && l.pipelineStartedAt){
           var se=(Date.now()-l.pipelineStartedAt)/1000;
@@ -1180,12 +1188,12 @@ app.get("/", (req, res) => {
             h += '<div class="video-item">';
             h += '<div class="video-info">';
             h += '<div class="video-name">' + esc(v.name) + '</div>';
-            h += '<div class="video-size' + (v.isLarge ? ' large' : '') + '">' + v.sizeMB + ' MB' + (v.isLarge ? ' (grande)' : '') + '</div>';
+            h += '<div class="video-size' + (v.isLarge ? ' large' : '') + '">' + v.sizeMB + ' MB' + (v.isLarge ? ' (recomendado reducir)' : '') + (v.isProcessed ? ' (ya procesado)' : '') + '</div>';
             h += '</div>';
             h += '<div style="display:flex;gap:6px">';
-          if (v.isLarge && !comp) {
+          if (!v.isProcessed && !comp) {
             h += '<button class="btn btn--small btn--compress" onclick="mostrarOpciones(\\'' + esc(v.name).replace(/'/g,"\\\\'") + '\\')">Reducir</button>';
-          } else if (v.isLarge && comp) {
+          } else if (!v.isProcessed && comp) {
             h += '<button class="btn btn--small btn--compress" disabled>Reducir</button>';
           }
           h += '<button class="btn btn--small" style="background:transparent;color:var(--danger);padding:0 8px" onclick="eliminarVideo(\\'' + esc(v.name).replace(/'/g,"\\\\'") + '\\')">&#128465;</button>';
@@ -1386,6 +1394,7 @@ app.get("/api/status", (req, res) => {
         pipelineStartedAt: l.pipelineStartedAt,
         videoDurSec: l.videoDurSec,
         estEndAt: l.estEndAt,
+        videoEndsAt: l.videoEndsAt,
         delaySec: l.delaySec,
         progress: l.feederDurSec > 0
           ? Math.min(100, +(l.ffmpegTimeSec / l.feederDurSec * 100).toFixed(1))
@@ -1398,11 +1407,13 @@ app.get("/api/status", (req, res) => {
 
 // --- API de reducción de videos ---
 app.get("/api/videos", (req, res) => {
+  const processedSuffixes = /_(?:reducido|hq|min)\.mp4$/i;
   const videos = listVideos().map(v => ({
     name: v.name,
     sizeMB: Math.round(v.size / 1024 / 1024),
     sizeBytes: v.size,
-    isLarge: v.size > 500 * 1024 * 1024
+    isLarge: v.size > 500 * 1024 * 1024,  // marcar en rojo (recomendado)
+    isProcessed: processedSuffixes.test(v.name)  // ya fue comprimido
   }));
   res.json({ videos, compresion: compresionState.active, historial: compresionState.history.slice(0, 5) });
 });
