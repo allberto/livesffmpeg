@@ -1325,14 +1325,14 @@ app.get("/", (req, res) => {
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">' +
           '<span style="font-size:.875rem;color:var(--text-muted);word-break:break-all">' + esc(filename) + '</span>' +
           '<div style="display:flex;gap:6px;align-items:center">' +
-          '<span style="font-size:.75rem;color:var(--text-muted)">Velocidad:</span>' +
-          '<button class="speed-btn" data-speed="1" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(\\'' + videoId + '\\',1,this)">1x</button>' +
-          '<button class="speed-btn" data-speed="2" style="background:var(--bg-input);color:var(--text);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(\\'' + videoId + '\\',2,this)">2x</button>' +
-          '<button class="speed-btn" data-speed="3" style="background:var(--bg-input);color:var(--text);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(\\'' + videoId + '\\',3,this)">3x</button>' +
-          '<button class="speed-btn" data-speed="5" style="background:var(--bg-input);color:var(--text);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(\\'' + videoId + '\\',5,this)">5x</button>' +
+          '<span style="font-size:.75rem;color:var(--text-muted)">Vel:</span>' +
+          '<button class="speed-btn" data-speed="1" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:10px 14px;cursor:pointer;font-size:.875rem;font-weight:600;min-width:44px" onclick="setSpeed(\\'' + videoId + '\\',1,this)">1x</button>' +
+          '<button class="speed-btn" data-speed="2" style="background:var(--bg-input);color:var(--text);border:none;border-radius:6px;padding:10px 14px;cursor:pointer;font-size:.875rem;font-weight:600;min-width:44px" onclick="setSpeed(\\'' + videoId + '\\',2,this)">2x</button>' +
+          '<button class="speed-btn" data-speed="3" style="background:var(--bg-input);color:var(--text);border:none;border-radius:6px;padding:10px 14px;cursor:pointer;font-size:.875rem;font-weight:600;min-width:44px" onclick="setSpeed(\\'' + videoId + '\\',3,this)">3x</button>' +
+          '<button class="speed-btn" data-speed="5" style="background:var(--bg-input);color:var(--text);border:none;border-radius:6px;padding:10px 14px;cursor:pointer;font-size:.875rem;font-weight:600;min-width:44px" onclick="setSpeed(\\'' + videoId + '\\',5,this)">5x</button>' +
           '<button style="background:var(--danger);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:600;margin-left:8px" onclick="this.closest(\\'.modal-video\\').remove()">Cerrar</button>' +
           '</div></div>' +
-          '<video id="' + videoId + '" controls autoplay style="width:100%;max-height:70vh;background:#000;border-radius:8px" src="/videos/' + encodeURIComponent(filename) + '"></video>' +
+          '<video id="' + videoId + '" controls autoplay playsinline webkit-playsinline style="width:100%;max-height:70vh;background:#000;border-radius:8px" src="/videos/' + encodeURIComponent(filename) + '"></video>' +
           '</div>';
         document.body.appendChild(modal);
         modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
