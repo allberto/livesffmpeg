@@ -84,6 +84,12 @@ const state = {
   history: []
 };
 
+// --- Estado de compresión de videos ---
+const compresionState = {
+  active: null, // { filename, outputName, startedAt, progress, status, pid, sizeBefore, sizeAfter, error }
+  history: []   // últimas 5 compresiones completadas
+};
+
 const SCHEDULED_STATE_FILE = path.join(LOG_DIR, ".scheduled.json");
 
 function saveScheduledState() {
@@ -894,6 +900,22 @@ app.get("/", (req, res) => {
     .delay-med { color:#eab308; }
     .delay-bad { color:#ef4444; }
     .countdown { font-variant-numeric:tabular-nums; }
+    /* Videos list */
+    .video-item { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; background:var(--bg-input); border-radius:var(--radius-sm); margin-bottom:8px; }
+    .video-item:last-child { margin-bottom:0; }
+    .video-info { flex:1; min-width:0; }
+    .video-name { font-size:.875rem; word-break:break-all; }
+    .video-size { font-size:.75rem; color:var(--text-muted); margin-top:2px; }
+    .video-size.large { color:var(--danger); font-weight:600; }
+    .btn--small { min-height:36px; padding:0 12px; font-size:.8125rem; width:auto; }
+    .btn--compress { background:var(--accent); color:#fff; }
+    .btn--compress:hover { background:var(--accent-hover); }
+    .btn--compress:disabled { background:var(--text-muted); cursor:not-allowed; opacity:.6; }
+    .compress-status { margin-top:var(--space); padding:var(--space-sm); background:rgba(59,130,246,.15); border-radius:var(--radius-sm); border-left:3px solid var(--accent); }
+    .compress-status.error { background:rgba(239,68,68,.15); border-left-color:var(--danger); }
+    .compress-status.success { background:rgba(34,197,94,.15); border-left-color:var(--success); }
+    .compress-prog { height:6px; background:rgba(255,255,255,.1); border-radius:3px; margin-top:8px; overflow:hidden; }
+    .compress-prog__bar { height:100%; background:var(--accent); border-radius:3px; transition:width .5s; }
   </style>
 </head>
 <body>
@@ -906,6 +928,11 @@ app.get("/", (req, res) => {
     <section id="status-card" class="card card--status idle">
       <h2 class="card__title">Estado</h2>
       <div id="live-status"><p style="margin:0;color:var(--text-muted)">Cargando...</p></div>
+    </section>
+
+    <section class="card" id="videos-card">
+      <h2 class="card__title">Videos</h2>
+      <div id="videos-list"><p style="margin:0;color:var(--text-muted)">Cargando...</p></div>
     </section>
 
     <section class="card">
@@ -968,6 +995,13 @@ app.get("/", (req, res) => {
         </div>
         <p class="hint">Protege esta página con Cloudflare Access o Basic Auth.</p>
       </form>
+    </section>
+
+    <section class="card" id="speedtest-card">
+      <h2 class="card__title">Internet</h2>
+      <div id="speedtest-content">
+        <button class="btn btn--small btn--compress" id="speedtest-btn" onclick="runSpeedtest()">Medir velocidad</button>
+      </div>
     </section>
 
     <section class="card api-card">
@@ -1090,6 +1124,187 @@ app.get("/", (req, res) => {
       poll();
       setInterval(poll, 2000);
     })();
+
+    /* --- Videos management --- */
+    (function(){
+      var container = document.getElementById('videos-list');
+      if (!container) return;
+
+      function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+      function renderVideos(data){
+        var videos = data.videos || [];
+        var comp = data.compresion;
+        var hist = data.historial || [];
+        var h = '';
+
+        // Compresión activa
+        if (comp) {
+          var isError = comp.status === 'error';
+          h += '<div class="compress-status' + (isError ? ' error' : '') + '">';
+          h += '<div style="display:flex;justify-content:space-between;align-items:center">';
+          h += '<span style="font-weight:600">' + (isError ? 'Error' : 'Comprimiendo...') + '</span>';
+          if (!isError) {
+            h += '<span style="font-size:.875rem">' + comp.progress + '%</span>';
+          }
+          h += '</div>';
+          h += '<div style="font-size:.8125rem;color:var(--text-muted);margin-top:4px">' + esc(comp.filename) + ' &rarr; ' + esc(comp.outputName) + '</div>';
+          if (comp.profile) h += '<div style="font-size:.75rem;color:var(--text-muted);margin-top:2px">' + esc(comp.profile) + '</div>';
+          if (!isError) {
+            h += '<div class="compress-prog"><div class="compress-prog__bar" style="width:' + comp.progress + '%"></div></div>';
+            h += '<button class="btn btn--small btn--danger" style="margin-top:10px" onclick="cancelarCompresion()">Cancelar</button>';
+          } else {
+            h += '<div style="color:var(--danger);font-size:.8125rem;margin-top:6px">' + esc(comp.error) + '</div>';
+          }
+          h += '</div>';
+        }
+
+        // Última compresión exitosa
+        if (hist.length > 0 && !comp) {
+          var last = hist[0];
+          var sizeBefore = Math.round(last.sizeBefore / 1024 / 1024);
+          var sizeAfter = Math.round(last.sizeAfter / 1024 / 1024);
+          h += '<div class="compress-status success" style="margin-bottom:var(--space)">';
+          h += '<div style="font-weight:600">Compresion completada</div>';
+          h += '<div style="font-size:.8125rem;margin-top:4px">' + esc(last.outputName) + '</div>';
+          h += '<div style="font-size:.8125rem;color:var(--text-muted)">' + sizeBefore + ' MB &rarr; ' + sizeAfter + ' MB (-' + last.reduction + '%)</div>';
+          h += '</div>';
+        }
+
+        // Lista de videos
+        if (videos.length === 0) {
+          h += '<p style="margin:0;color:var(--text-muted)">No hay videos en la carpeta.</p>';
+        } else {
+          for (var i = 0; i < videos.length; i++) {
+            var v = videos[i];
+            h += '<div class="video-item">';
+            h += '<div class="video-info">';
+            h += '<div class="video-name">' + esc(v.name) + '</div>';
+            h += '<div class="video-size' + (v.isLarge ? ' large' : '') + '">' + v.sizeMB + ' MB' + (v.isLarge ? ' (grande)' : '') + '</div>';
+            h += '</div>';
+            h += '<div style="display:flex;gap:6px">';
+          if (v.isLarge && !comp) {
+            h += '<button class="btn btn--small btn--compress" onclick="mostrarOpciones(\\'' + esc(v.name).replace(/'/g,"\\\\'") + '\\')">Reducir</button>';
+          } else if (v.isLarge && comp) {
+            h += '<button class="btn btn--small btn--compress" disabled>Reducir</button>';
+          }
+          h += '<button class="btn btn--small" style="background:transparent;color:var(--danger);padding:0 8px" onclick="eliminarVideo(\\'' + esc(v.name).replace(/'/g,"\\\\'") + '\\')">&#128465;</button>';
+          h += '</div>';
+          h += '</div>';
+          }
+        }
+
+        container.innerHTML = h;
+      }
+
+      window.mostrarOpciones = function(filename){
+        var modal = document.createElement('div');
+        modal.className = 'modal-compress';
+        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+        modal.innerHTML = '<div style="background:var(--bg-card);border-radius:var(--radius);padding:20px;max-width:340px;width:100%">' +
+          '<h3 style="margin:0 0 16px;font-size:1rem">Reducir: ' + esc(filename) + '</h3>' +
+          '<p style="margin:0 0 12px;font-size:.875rem;color:var(--text-muted)">Selecciona el nivel de compresion:</p>' +
+          '<button class="btn btn--small" style="width:100%;margin-bottom:8px;background:var(--success)" onclick="reducirVideo(\\'' + esc(filename).replace(/'/g,"\\\\'") + '\\',\\'alta\\')">Alta calidad<br><span style=\\'font-weight:400;font-size:.75rem\\'>1080p, CRF 20 — ideal para venta</span></button>' +
+          '<button class="btn btn--small" style="width:100%;margin-bottom:8px;background:var(--accent)" onclick="reducirVideo(\\'' + esc(filename).replace(/'/g,"\\\\'") + '\\',\\'balanceado\\')">Balanceado<br><span style=\\'font-weight:400;font-size:.75rem\\'>1080p, CRF 23 — streaming</span></button>' +
+          '<button class="btn btn--small" style="width:100%;margin-bottom:12px;background:var(--text-muted)" onclick="reducirVideo(\\'' + esc(filename).replace(/'/g,"\\\\'") + '\\',\\'maximo\\')">Maxima compresion<br><span style=\\'font-weight:400;font-size:.75rem\\'>720p, CRF 28 — archivo pequeno</span></button>' +
+          '<button class="btn btn--small btn--danger" style="width:100%" onclick="this.closest(\\'div\\').parentElement.remove()">Cancelar</button>' +
+          '</div>';
+        document.body.appendChild(modal);
+        modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
+      };
+
+      window.reducirVideo = function(filename, perfil){
+        // Cerrar modal
+        var modals = document.querySelectorAll('.modal-compress');
+        modals.forEach(function(m){ m.remove(); });
+
+        fetch('/api/reducir/' + encodeURIComponent(filename), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ perfil: perfil || 'balanceado' })
+        })
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            if (d.error) alert('Error: ' + d.error);
+            pollVideos();
+          })
+          .catch(function(e){ alert('Error: ' + e); });
+      };
+
+      window.eliminarVideo = function(filename){
+        if (!confirm('Eliminar "' + filename + '"?\\n\\nEsta accion no se puede deshacer.')) return;
+        fetch('/api/videos/' + encodeURIComponent(filename), { method: 'DELETE' })
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            if (d.error) alert('Error: ' + d.error);
+            pollVideos();
+          })
+          .catch(function(e){ alert('Error: ' + e); });
+      };
+
+      window.cancelarCompresion = function(){
+        if (!confirm('Cancelar compresion en curso?')) return;
+        fetch('/api/reducir/cancelar', { method: 'POST' })
+          .then(function(){ pollVideos(); })
+          .catch(function(){});
+      };
+
+      function pollVideos(){
+        fetch('/api/videos').then(function(r){ return r.json(); }).then(renderVideos).catch(function(){});
+      }
+
+      pollVideos();
+      setInterval(pollVideos, 3000);
+    })();
+
+    /* --- Speedtest --- */
+    (function(){
+      var btn = document.getElementById('speedtest-btn');
+      var container = document.getElementById('speedtest-content');
+      if (!btn || !container) return;
+
+      window.runSpeedtest = function(){
+        btn.disabled = true;
+        btn.textContent = 'Midiendo...';
+        container.innerHTML = '<button class="btn btn--small btn--compress" disabled>Midiendo... (30-60s)</button>';
+
+        fetch('/api/speedtest')
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            if (d.error) {
+              container.innerHTML = '<div style="color:var(--danger);font-size:.875rem">' + d.error + '</div>' +
+                '<button class="btn btn--small btn--compress" style="margin-top:10px" onclick="runSpeedtest()">Reintentar</button>';
+            } else {
+              container.innerHTML = '<div class="kv-grid" style="margin:0">' +
+                '<dt>Download</dt><dd><strong style="color:var(--success)">' + d.download + ' Mbps</strong></dd>' +
+                '<dt>Upload</dt><dd><strong style="color:var(--accent)">' + d.upload + ' Mbps</strong></dd>' +
+                '<dt>Ping</dt><dd>' + d.ping + ' ms</dd>' +
+                '<dt>Servidor</dt><dd style="font-size:.75rem">' + d.server + '</dd>' +
+                '</div>' +
+                '<button class="btn btn--small btn--compress" style="margin-top:12px" onclick="runSpeedtest()">Medir de nuevo</button>';
+            }
+          })
+          .catch(function(e){
+            container.innerHTML = '<div style="color:var(--danger);font-size:.875rem">Error: ' + e + '</div>' +
+              '<button class="btn btn--small btn--compress" style="margin-top:10px" onclick="runSpeedtest()">Reintentar</button>';
+          });
+      };
+
+      // Verificar si está bloqueado por stream activo
+      function checkSpeedtestStatus(){
+        fetch('/api/speedtest/status')
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            var btn = container.querySelector('button');
+            if (btn && !d.running) {
+              btn.disabled = d.blocked;
+              if (d.blocked) btn.title = 'No disponible durante stream';
+            }
+          })
+          .catch(function(){});
+      }
+      setInterval(checkSpeedtestStatus, 5000);
+    })();
   </script>
 </body>
 </html>`);
@@ -1179,6 +1394,258 @@ app.get("/api/status", (req, res) => {
     } : null,
     history: state.history.slice(0, 10)
   });
+});
+
+// --- API de reducción de videos ---
+app.get("/api/videos", (req, res) => {
+  const videos = listVideos().map(v => ({
+    name: v.name,
+    sizeMB: Math.round(v.size / 1024 / 1024),
+    sizeBytes: v.size,
+    isLarge: v.size > 500 * 1024 * 1024
+  }));
+  res.json({ videos, compresion: compresionState.active, historial: compresionState.history.slice(0, 5) });
+});
+
+// Perfiles de compresión: calidad (CRF bajo = mejor calidad, archivo más grande)
+const COMPRESS_PROFILES = {
+  alta:      { crf: "20", preset: "medium", maxH: 1080, label: "Alta calidad (1080p, CRF 20)" },
+  balanceado:{ crf: "23", preset: "medium", maxH: 1080, label: "Balanceado (1080p, CRF 23)" },
+  maximo:    { crf: "28", preset: "faster", maxH: 720,  label: "Máxima compresión (720p, CRF 28)" }
+};
+
+app.post("/api/reducir/:filename", async (req, res) => {
+  const filename = req.params.filename;
+  const profileKey = req.body.perfil || "balanceado";
+  const profile = COMPRESS_PROFILES[profileKey] || COMPRESS_PROFILES.balanceado;
+
+  if (compresionState.active) {
+    return res.status(409).json({ error: "Ya hay una compresión en curso", active: compresionState.active.filename });
+  }
+
+  const videoPath = path.join(VIDEOS_DIR, filename);
+  if (!fs.existsSync(videoPath)) {
+    return res.status(404).json({ error: "Video no encontrado" });
+  }
+
+  const stats = fs.statSync(videoPath);
+  const ext = path.extname(filename);
+  const baseName = path.basename(filename, ext);
+  const suffix = profileKey === "alta" ? "_hq" : profileKey === "maximo" ? "_min" : "_reducido";
+  const outputName = `${baseName}${suffix}.mp4`;
+  const outputPath = path.join(VIDEOS_DIR, outputName);
+
+  // Obtener duración para calcular progreso
+  let duration = 0;
+  try {
+    const probe = await probeVideo(videoPath);
+    duration = probe.duration || 0;
+  } catch (e) {
+    console.log(`[REDUCIR] No se pudo obtener duración de ${filename}: ${e?.message}`);
+  }
+
+  compresionState.active = {
+    filename,
+    outputName,
+    profile: profile.label,
+    startedAt: Date.now(),
+    progress: 0,
+    status: "comprimiendo",
+    sizeBefore: stats.size,
+    sizeAfter: null,
+    duration,
+    error: null
+  };
+
+  // Calcular resolución máxima según perfil
+  const maxH = profile.maxH || 720;
+  const maxW = Math.round(maxH * 16 / 9); // 1920 para 1080, 1280 para 720
+
+  // FFmpeg args con perfil seleccionado
+  const args = [
+    "-y",
+    "-i", videoPath,
+    "-c:v", "libx264",
+    "-preset", profile.preset,
+    "-crf", profile.crf,
+    "-vf", `scale='min(${maxW},iw)':'min(${maxH},ih)':force_original_aspect_ratio=decrease,format=yuv420p`,
+    "-c:a", "aac",
+    "-b:a", "128k",
+    "-movflags", "+faststart",
+    "-progress", "pipe:1",
+    outputPath
+  ];
+
+  console.log(`[REDUCIR] Iniciando: ${filename} -> ${outputName}`);
+
+  const ffmpeg = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+  compresionState.active.pid = ffmpeg.pid;
+
+  // Bajar prioridad para no afectar streams
+  try { os.setPriority(ffmpeg.pid, 15); } catch {}
+
+  // Parsear progreso desde stdout (progress pipe)
+  ffmpeg.stdout.on("data", (data) => {
+    const lines = String(data).split("\n");
+    for (const line of lines) {
+      // out_time_ms=12345678 (microsegundos)
+      const m = line.match(/out_time_ms=(\d+)/);
+      if (m && duration > 0) {
+        const currentSec = parseInt(m[1]) / 1_000_000;
+        compresionState.active.progress = Math.min(99, Math.round((currentSec / duration) * 100));
+      }
+    }
+  });
+
+  ffmpeg.stderr.on("data", (data) => {
+    // Log errores pero no spam
+    const s = String(data).trim();
+    if (s.includes("error") || s.includes("Error")) {
+      console.log(`[REDUCIR] ${s}`);
+    }
+  });
+
+  ffmpeg.on("close", (code) => {
+    if (code === 0 && fs.existsSync(outputPath)) {
+      const outStats = fs.statSync(outputPath);
+      const reduction = Math.round((1 - outStats.size / stats.size) * 100);
+      console.log(`[REDUCIR] Completado: ${outputName} (${Math.round(outStats.size/1024/1024)}MB, -${reduction}%)`);
+
+      compresionState.history.unshift({
+        filename,
+        outputName,
+        sizeBefore: stats.size,
+        sizeAfter: outStats.size,
+        reduction,
+        completedAt: Date.now()
+      });
+      if (compresionState.history.length > 5) compresionState.history.pop();
+
+      compresionState.active = null;
+    } else {
+      console.log(`[REDUCIR] Falló: code=${code}`);
+      if (compresionState.active) {
+        compresionState.active.status = "error";
+        compresionState.active.error = `FFmpeg terminó con código ${code}`;
+        // Limpiar después de 30s
+        setTimeout(() => {
+          if (compresionState.active?.status === "error") {
+            compresionState.active = null;
+          }
+        }, 30000);
+      }
+    }
+  });
+
+  ffmpeg.on("error", (err) => {
+    console.log(`[REDUCIR] Error spawn: ${err?.message}`);
+    if (compresionState.active) {
+      compresionState.active.status = "error";
+      compresionState.active.error = err?.message || "Error desconocido";
+    }
+  });
+
+  res.json({ ok: true, mensaje: `Compresión iniciada: ${filename} -> ${outputName}` });
+});
+
+app.post("/api/reducir/cancelar", (req, res) => {
+  if (!compresionState.active) {
+    return res.status(400).json({ error: "No hay compresión activa" });
+  }
+
+  try {
+    process.kill(compresionState.active.pid, "SIGTERM");
+    console.log(`[REDUCIR] Cancelado por usuario: ${compresionState.active.filename}`);
+    compresionState.active = null;
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e?.message });
+  }
+});
+
+// --- Speedtest ---
+let speedtestRunning = false;
+
+app.get("/api/speedtest", (req, res) => {
+  // No permitir si hay stream activo
+  if (state.current && ["preview", "main", "post"].includes(state.current.status)) {
+    return res.status(409).json({ error: "No se puede ejecutar durante un stream activo" });
+  }
+
+  if (speedtestRunning) {
+    return res.status(409).json({ error: "Ya hay un test en curso" });
+  }
+
+  speedtestRunning = true;
+  console.log("[SPEEDTEST] Iniciando...");
+
+  const speedtest = spawn("speedtest-cli", ["--json"], { stdio: ["ignore", "pipe", "pipe"] });
+  let output = "";
+  let errorOutput = "";
+
+  speedtest.stdout.on("data", (d) => { output += d; });
+  speedtest.stderr.on("data", (d) => { errorOutput += d; });
+
+  speedtest.on("close", (code) => {
+    speedtestRunning = false;
+    if (code !== 0) {
+      console.log(`[SPEEDTEST] Error: ${errorOutput}`);
+      return res.status(500).json({ error: "Speedtest falló", details: errorOutput });
+    }
+
+    try {
+      const data = JSON.parse(output);
+      const result = {
+        download: (data.download / 1_000_000).toFixed(2), // Mbps
+        upload: (data.upload / 1_000_000).toFixed(2),     // Mbps
+        ping: data.ping.toFixed(1),                        // ms
+        server: data.server?.sponsor || "Desconocido"
+      };
+      console.log(`[SPEEDTEST] OK: ${result.download} Mbps down, ${result.upload} Mbps up, ${result.ping}ms`);
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ error: "Error parseando resultado", details: e?.message });
+    }
+  });
+
+  speedtest.on("error", (err) => {
+    speedtestRunning = false;
+    res.status(500).json({ error: "No se pudo ejecutar speedtest-cli", details: err?.message });
+  });
+});
+
+app.get("/api/speedtest/status", (req, res) => {
+  const streamActive = state.current && ["preview", "main", "post"].includes(state.current.status);
+  res.json({ running: speedtestRunning, blocked: streamActive });
+});
+
+app.delete("/api/videos/:filename", (req, res) => {
+  const filename = req.params.filename;
+  const videoPath = path.join(VIDEOS_DIR, filename);
+
+  // Seguridad: verificar que el archivo está dentro de VIDEOS_DIR
+  const realPath = path.resolve(videoPath);
+  const realVideosDir = path.resolve(VIDEOS_DIR);
+  if (!realPath.startsWith(realVideosDir)) {
+    return res.status(403).json({ error: "Acceso denegado" });
+  }
+
+  if (!fs.existsSync(videoPath)) {
+    return res.status(404).json({ error: "Video no encontrado" });
+  }
+
+  // No permitir eliminar si está en compresión
+  if (compresionState.active && (compresionState.active.filename === filename || compresionState.active.outputName === filename)) {
+    return res.status(409).json({ error: "No se puede eliminar, está en proceso de compresión" });
+  }
+
+  try {
+    fs.unlinkSync(videoPath);
+    console.log(`[VIDEOS] Eliminado: ${filename}`);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e?.message });
+  }
 });
 
 function restoreScheduledIfAny() {
