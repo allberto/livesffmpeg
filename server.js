@@ -1188,9 +1188,11 @@ app.get("/", (req, res) => {
             h += '<div class="video-item">';
             h += '<div class="video-info">';
             h += '<div class="video-name">' + esc(v.name) + '</div>';
-            h += '<div class="video-size' + (v.isLarge ? ' large' : '') + '">' + v.sizeMB + ' MB' + (v.isLarge ? ' (recomendado reducir)' : '') + (v.isProcessed ? ' (ya procesado)' : '') + '</div>';
+            var dateStr = v.mtime ? new Date(v.mtime).toLocaleDateString('es-MX', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '';
+            h += '<div class="video-size' + (v.isLarge ? ' large' : '') + '">' + v.sizeMB + ' MB &middot; ' + dateStr + (v.isLarge ? ' (recomendado reducir)' : '') + (v.isProcessed ? ' (ya procesado)' : '') + '</div>';
             h += '</div>';
             h += '<div style="display:flex;gap:6px">';
+          h += '<button class="btn btn--small" style="background:var(--bg);border:1px solid var(--text-muted);color:var(--text);padding:0 10px" onclick="verVideo(\\'' + esc(v.name).replace(/'/g,"\\\\'") + '\\')">&#9654;</button>';
           if (!v.isProcessed && !comp) {
             h += '<button class="btn btn--small btn--compress" onclick="mostrarOpciones(\\'' + esc(v.name).replace(/'/g,"\\\\'") + '\\')">Reducir</button>';
           } else if (!v.isProcessed && comp) {
@@ -1255,6 +1257,45 @@ app.get("/", (req, res) => {
         fetch('/api/reducir/cancelar', { method: 'POST' })
           .then(function(){ pollVideos(); })
           .catch(function(){});
+      };
+
+      window.verVideo = function(filename){
+        var modal = document.createElement('div');
+        modal.className = 'modal-video';
+        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;padding:16px';
+        var videoId = 'preview-video-' + Date.now();
+        modal.innerHTML = '<div style="width:100%;max-width:900px;position:relative">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">' +
+          '<span style="font-size:.875rem;color:var(--text-muted);word-break:break-all">' + esc(filename) + '</span>' +
+          '<div style="display:flex;gap:6px;align-items:center">' +
+          '<span style="font-size:.75rem;color:var(--text-muted)">Velocidad:</span>' +
+          '<button class="speed-btn" data-speed="1" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(' + videoId + ',1,this)">1x</button>' +
+          '<button class="speed-btn" data-speed="2" style="background:var(--bg-input);color:var(--text);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(' + videoId + ',2,this)">2x</button>' +
+          '<button class="speed-btn" data-speed="3" style="background:var(--bg-input);color:var(--text);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(' + videoId + ',3,this)">3x</button>' +
+          '<button class="speed-btn" data-speed="5" style="background:var(--bg-input);color:var(--text);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(' + videoId + ',5,this)">5x</button>' +
+          '<button style="background:var(--danger);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:600;margin-left:8px" onclick="this.closest(\\'.modal-video\\').remove()">Cerrar</button>' +
+          '</div></div>' +
+          '<video id="' + videoId + '" controls autoplay style="width:100%;max-height:70vh;background:#000;border-radius:8px" src="/videos/' + encodeURIComponent(filename) + '"></video>' +
+          '</div>';
+        document.body.appendChild(modal);
+        modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
+        // Cerrar con Escape
+        var escHandler = function(e){ if(e.key==='Escape'){ modal.remove(); document.removeEventListener('keydown',escHandler); } };
+        document.addEventListener('keydown', escHandler);
+      };
+
+      window.setSpeed = function(videoId, speed, btn){
+        var video = document.getElementById(videoId);
+        if(video) video.playbackRate = speed;
+        // Actualizar estilos de botones
+        var btns = btn.parentElement.querySelectorAll('.speed-btn');
+        btns.forEach(function(b){
+          if(parseFloat(b.dataset.speed) === speed){
+            b.style.background = 'var(--accent)';
+          } else {
+            b.style.background = 'var(--bg-input)';
+          }
+        });
       };
 
       function pollVideos(){
@@ -1412,6 +1453,7 @@ app.get("/api/videos", (req, res) => {
     name: v.name,
     sizeMB: Math.round(v.size / 1024 / 1024),
     sizeBytes: v.size,
+    mtime: v.mtime,  // timestamp de modificación
     isLarge: v.size > 500 * 1024 * 1024,  // marcar en rojo (recomendado)
     isProcessed: processedSuffixes.test(v.name)  // ya fue comprimido
   }));
@@ -1630,6 +1672,49 @@ app.get("/api/speedtest", (req, res) => {
 app.get("/api/speedtest/status", (req, res) => {
   const streamActive = state.current && ["preview", "main", "post"].includes(state.current.status);
   res.json({ running: speedtestRunning, blocked: streamActive });
+});
+
+// Servir videos para preview
+app.get("/videos/:filename", (req, res) => {
+  const filename = req.params.filename;
+  const videoPath = path.join(VIDEOS_DIR, filename);
+
+  // Seguridad: verificar que el archivo está dentro de VIDEOS_DIR
+  const realPath = path.resolve(videoPath);
+  const realVideosDir = path.resolve(VIDEOS_DIR);
+  if (!realPath.startsWith(realVideosDir)) {
+    return res.status(403).send("Acceso denegado");
+  }
+
+  if (!fs.existsSync(videoPath)) {
+    return res.status(404).send("Video no encontrado");
+  }
+
+  const stat = fs.statSync(videoPath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
+  // Soporte para range requests (necesario para seeking en el video)
+  if (range) {
+    const parts = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunksize = (end - start) + 1;
+    const file = fs.createReadStream(videoPath, { start, end });
+    res.writeHead(206, {
+      "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+      "Accept-Ranges": "bytes",
+      "Content-Length": chunksize,
+      "Content-Type": "video/mp4"
+    });
+    file.pipe(res);
+  } else {
+    res.writeHead(200, {
+      "Content-Length": fileSize,
+      "Content-Type": "video/mp4"
+    });
+    fs.createReadStream(videoPath).pipe(res);
+  }
 });
 
 app.delete("/api/videos/:filename", (req, res) => {
