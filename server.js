@@ -227,14 +227,42 @@ function probeVideo(filePath) {
   });
 }
 
-function stopProc(proc) {
-  if (!proc || proc.killed) return;
+function stopProc(proc, tag = "PROC") {
+  if (!proc) return;
+  const pid = proc.pid;
+  console.log(`[STOP] Intentando detener ${tag} pid=${pid} killed=${proc.killed}`);
+
+  if (proc.killed) return;
+
   try {
-    proc.kill("SIGINT");
+    // Primero SIGTERM (terminar limpiamente)
+    proc.kill("SIGTERM");
+    console.log(`[STOP] Enviado SIGTERM a ${tag} pid=${pid}`);
+
+    // Después de 1s, SIGKILL si sigue vivo
     setTimeout(() => {
-      if (!proc.killed) proc.kill("SIGKILL");
+      if (!proc.killed) {
+        try {
+          proc.kill("SIGKILL");
+          console.log(`[STOP] Enviado SIGKILL a ${tag} pid=${pid}`);
+        } catch {}
+      }
+    }, 1000);
+
+    // Respaldo: matar por PID directamente con kill del sistema
+    setTimeout(() => {
+      try {
+        const check = spawnSync("kill", ["-0", String(pid)], { timeout: 1000 });
+        if (check.status === 0) {
+          // Proceso sigue vivo, matar con kill -9
+          console.log(`[STOP] ${tag} pid=${pid} sigue vivo, forzando kill -9`);
+          spawnSync("kill", ["-9", String(pid)], { timeout: 1000 });
+        }
+      } catch {}
     }, 2500);
-  } catch {}
+  } catch (e) {
+    console.log(`[STOP] Error matando ${tag}: ${e?.message}`);
+  }
 }
 
 // Filtro de video adaptativo: omite scale/pad/fps si el input ya coincide con el target
@@ -522,15 +550,15 @@ function runSeamlessPipeline(cortPath, videoPath, rtmpUrl, previewSec, postSec, 
       if (cancelled) return;
       logLine(id, `PIPELINE ERROR: ${err?.message || err}`);
       await pushover("⚠️ Pipeline falló", `Evento ${id}\n${err?.message || err}`, 1);
-      stopProc(muxer);
+      stopProc(muxer, "MUXER");
     }
   };
 
   // Expose cancel helper
   ctx._cancelPipeline = () => {
     cancelled = true;
-    stopProc(ctx.procs.feeder);
-    stopProc(ctx.procs.muxer);
+    stopProc(ctx.procs.feeder, "FEEDER");
+    stopProc(ctx.procs.muxer, "MUXER");
   };
 
   pipeline();
@@ -671,13 +699,38 @@ function scheduleEvent(config, opts = {}) {
 function cancelCurrent(reason = "user_cancel") {
   const ctx = state.current;
   if (!ctx) return false;
+
+  console.log(`[CANCEL] Cancelando evento ${ctx.id}, razón: ${reason}`);
+
+  // Cancelar jobs programados
   for (const j of ctx.jobs) { try { j.cancel(); } catch {} }
+
+  // Detener procesos
   if (ctx._cancelPipeline) {
     ctx._cancelPipeline();
   } else {
-    stopProc(ctx.procs.feeder);
-    stopProc(ctx.procs.muxer);
+    stopProc(ctx.procs.feeder, "FEEDER");
+    stopProc(ctx.procs.muxer, "MUXER");
   }
+
+  // Respaldo: matar todos los ffmpeg que puedan haber quedado huérfanos después de 3s
+  setTimeout(() => {
+    try {
+      // Buscar procesos ffmpeg que tengan el rtmp en sus argumentos
+      const result = spawnSync("pgrep", ["-f", "ffmpeg.*rtmp"], { encoding: "utf8", timeout: 2000 });
+      const pids = (result.stdout || "").trim().split("\n").filter(Boolean);
+      if (pids.length > 0) {
+        console.log(`[CANCEL] Encontrados ${pids.length} procesos ffmpeg huérfanos: ${pids.join(", ")}`);
+        for (const pid of pids) {
+          spawnSync("kill", ["-9", pid], { timeout: 1000 });
+        }
+        console.log(`[CANCEL] Procesos ffmpeg huérfanos eliminados`);
+      }
+    } catch (e) {
+      console.log(`[CANCEL] Error buscando procesos huérfanos: ${e?.message}`);
+    }
+  }, 3000);
+
   logLine(ctx.id, `CANCELLED reason=${reason}`);
   pushover("Evento cancelado", `Evento ${ctx.id}\nMotivo: ${reason}`, 1);
   state.history.unshift({ id: ctx.id, cancelledAt: nowISO(), config: ctx.config });
@@ -1269,10 +1322,10 @@ app.get("/", (req, res) => {
           '<span style="font-size:.875rem;color:var(--text-muted);word-break:break-all">' + esc(filename) + '</span>' +
           '<div style="display:flex;gap:6px;align-items:center">' +
           '<span style="font-size:.75rem;color:var(--text-muted)">Velocidad:</span>' +
-          '<button class="speed-btn" data-speed="1" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(' + videoId + ',1,this)">1x</button>' +
-          '<button class="speed-btn" data-speed="2" style="background:var(--bg-input);color:var(--text);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(' + videoId + ',2,this)">2x</button>' +
-          '<button class="speed-btn" data-speed="3" style="background:var(--bg-input);color:var(--text);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(' + videoId + ',3,this)">3x</button>' +
-          '<button class="speed-btn" data-speed="5" style="background:var(--bg-input);color:var(--text);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(' + videoId + ',5,this)">5x</button>' +
+          '<button class="speed-btn" data-speed="1" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(\\'' + videoId + '\\',1,this)">1x</button>' +
+          '<button class="speed-btn" data-speed="2" style="background:var(--bg-input);color:var(--text);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(\\'' + videoId + '\\',2,this)">2x</button>' +
+          '<button class="speed-btn" data-speed="3" style="background:var(--bg-input);color:var(--text);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(\\'' + videoId + '\\',3,this)">3x</button>' +
+          '<button class="speed-btn" data-speed="5" style="background:var(--bg-input);color:var(--text);border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600" onclick="setSpeed(\\'' + videoId + '\\',5,this)">5x</button>' +
           '<button style="background:var(--danger);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:600;margin-left:8px" onclick="this.closest(\\'.modal-video\\').remove()">Cerrar</button>' +
           '</div></div>' +
           '<video id="' + videoId + '" controls autoplay style="width:100%;max-height:70vh;background:#000;border-radius:8px" src="/videos/' + encodeURIComponent(filename) + '"></video>' +
