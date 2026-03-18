@@ -1032,7 +1032,11 @@ app.get("/", (req, res) => {
 
         <label for="videoName">Video a lanzar</label>
         <select id="videoName" name="videoName">
-          ${vids.map(v => `<option value="${safeText(v.name)}"${latest && v.name===latest.name ? " selected" : ""}>${safeText(v.name)} (${Math.round(v.size/1024/1024)} MB)</option>`).join("")}
+          ${vids.map(v => {
+            const d = new Date(v.mtime);
+            const dateStr = d.toLocaleDateString("es-MX", {day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
+            return `<option value="${safeText(v.name)}"${latest && v.name===latest.name ? " selected" : ""}>${safeText(v.name)} (${Math.round(v.size/1024/1024)} MB - ${dateStr})</option>`;
+          }).join("")}
         </select>
 
         <label for="streamDest">Destino del stream</label>
