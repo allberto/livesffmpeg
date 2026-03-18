@@ -1590,7 +1590,8 @@ app.get("/api/speedtest", (req, res) => {
   speedtestRunning = true;
   console.log("[SPEEDTEST] Iniciando...");
 
-  const speedtest = spawn("speedtest-cli", ["--json"], { stdio: ["ignore", "pipe", "pipe"] });
+  // Usar speedtest de Ookla (oficial) con formato JSON
+  const speedtest = spawn("speedtest", ["--format=json", "--accept-license"], { stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   let errorOutput = "";
 
@@ -1606,11 +1607,12 @@ app.get("/api/speedtest", (req, res) => {
 
     try {
       const data = JSON.parse(output);
+      // Ookla speedtest: bandwidth en bytes/s, convertir a Mbps (*8/1000000)
       const result = {
-        download: (data.download / 1_000_000).toFixed(2), // Mbps
-        upload: (data.upload / 1_000_000).toFixed(2),     // Mbps
-        ping: data.ping.toFixed(1),                        // ms
-        server: data.server?.sponsor || "Desconocido"
+        download: ((data.download?.bandwidth || 0) * 8 / 1_000_000).toFixed(2),
+        upload: ((data.upload?.bandwidth || 0) * 8 / 1_000_000).toFixed(2),
+        ping: (data.ping?.latency || 0).toFixed(1),
+        server: data.server?.name || data.server?.host || "Desconocido"
       };
       console.log(`[SPEEDTEST] OK: ${result.download} Mbps down, ${result.upload} Mbps up, ${result.ping}ms`);
       res.json(result);
