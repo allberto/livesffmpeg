@@ -1629,6 +1629,7 @@ app.post("/api/reducir/:filename", async (req, res) => {
       const outStats = fs.statSync(outputPath);
       const reduction = Math.round((1 - outStats.size / stats.size) * 100);
       console.log(`[REDUCIR] Completado: ${outputName} (${Math.round(outStats.size/1024/1024)}MB, -${reduction}%)`);
+      pushover("Video comprimido", `${outputName}\n${Math.round(stats.size/1024/1024)} MB → ${Math.round(outStats.size/1024/1024)} MB (-${reduction}%)`);
 
       compresionState.history.unshift({
         filename,
@@ -1643,6 +1644,7 @@ app.post("/api/reducir/:filename", async (req, res) => {
       compresionState.active = null;
     } else {
       console.log(`[REDUCIR] Falló: code=${code}`);
+      pushover("Error comprimiendo", `${filename}\nFFmpeg terminó con código ${code}`, 1);
       if (compresionState.active) {
         compresionState.active.status = "error";
         compresionState.active.error = `FFmpeg terminó con código ${code}`;
