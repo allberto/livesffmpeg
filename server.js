@@ -1267,14 +1267,23 @@ app.get("/", (req, res) => {
       window.mostrarOpciones = function(filename){
         var modal = document.createElement('div');
         modal.className = 'modal-compress';
-        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
-        modal.innerHTML = '<div style="background:var(--bg-card);border-radius:var(--radius);padding:20px;max-width:340px;width:100%">' +
-          '<h3 style="margin:0 0 16px;font-size:1rem">Reducir: ' + esc(filename) + '</h3>' +
-          '<p style="margin:0 0 12px;font-size:.875rem;color:var(--text-muted)">Selecciona el nivel de compresion:</p>' +
-          '<button class="btn btn--small" style="width:100%;margin-bottom:8px;background:var(--success)" onclick="reducirVideo(\\'' + esc(filename).replace(/'/g,"\\\\'") + '\\',\\'alta\\')">Alta calidad<br><span style=\\'font-weight:400;font-size:.75rem\\'>1080p, CRF 20 — ideal para venta</span></button>' +
-          '<button class="btn btn--small" style="width:100%;margin-bottom:8px;background:var(--accent)" onclick="reducirVideo(\\'' + esc(filename).replace(/'/g,"\\\\'") + '\\',\\'balanceado\\')">Balanceado<br><span style=\\'font-weight:400;font-size:.75rem\\'>1080p, CRF 23 — streaming</span></button>' +
-          '<button class="btn btn--small" style="width:100%;margin-bottom:12px;background:var(--text-muted)" onclick="reducirVideo(\\'' + esc(filename).replace(/'/g,"\\\\'") + '\\',\\'maximo\\')">Maxima compresion<br><span style=\\'font-weight:400;font-size:.75rem\\'>720p, CRF 28 — archivo pequeno</span></button>' +
-          '<button class="btn btn--small btn--danger" style="width:100%" onclick="this.closest(\\'div\\').parentElement.remove()">Cancelar</button>' +
+        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+        modal.innerHTML = '<div style="background:var(--bg-card);border-radius:var(--radius);padding:24px;max-width:360px;width:100%">' +
+          '<h3 style="margin:0 0 8px;font-size:1.1rem;color:#fff">Reducir video</h3>' +
+          '<p style="margin:0 0 16px;font-size:.8rem;color:var(--text-muted);word-break:break-all">' + esc(filename) + '</p>' +
+          '<button style="display:block;width:100%;margin-bottom:10px;padding:14px 16px;background:#22c55e;color:#fff;border:none;border-radius:8px;cursor:pointer;text-align:left" onclick="reducirVideo(\\'' + esc(filename).replace(/'/g,"\\\\'") + '\\',\\'alta\\')">' +
+            '<strong style="font-size:.95rem">Alta calidad</strong><br>' +
+            '<span style="font-size:.8rem;opacity:.9">1080p, CRF 20 — ideal para venta</span>' +
+          '</button>' +
+          '<button style="display:block;width:100%;margin-bottom:10px;padding:14px 16px;background:#3b82f6;color:#fff;border:none;border-radius:8px;cursor:pointer;text-align:left" onclick="reducirVideo(\\'' + esc(filename).replace(/'/g,"\\\\'") + '\\',\\'balanceado\\')">' +
+            '<strong style="font-size:.95rem">Balanceado</strong><br>' +
+            '<span style="font-size:.8rem;opacity:.9">1080p, CRF 23 — streaming</span>' +
+          '</button>' +
+          '<button style="display:block;width:100%;margin-bottom:14px;padding:14px 16px;background:#6b7280;color:#fff;border:none;border-radius:8px;cursor:pointer;text-align:left" onclick="reducirVideo(\\'' + esc(filename).replace(/'/g,"\\\\'") + '\\',\\'maximo\\')">' +
+            '<strong style="font-size:.95rem">Maxima compresion</strong><br>' +
+            '<span style="font-size:.8rem;opacity:.9">720p, CRF 28 — archivo pequeno</span>' +
+          '</button>' +
+          '<button style="display:block;width:100%;padding:12px 16px;background:transparent;color:#ef4444;border:1px solid #ef4444;border-radius:8px;cursor:pointer;font-weight:600" onclick="this.closest(\\'div\\').parentElement.remove()">Cancelar</button>' +
           '</div>';
         document.body.appendChild(modal);
         modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
